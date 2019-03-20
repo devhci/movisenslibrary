@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="sensor_positions">
+        <item>Brust</item>
+        <item>Linker Knöchel</item>
+        <item>Linke Seite Hüfte</item>
+        <item>Linker Oberschenkel</item>
+        <item>Linker Oberarm</item>
+        <item>Linkes Handgelenk</item>
+        <item>Rechter Knöchel</item>
+        <item>Rechte Seite Hüfte</item>
+        <item>Rechter Oberschenkel</item>
+        <item>Rechter Oberarm</item>
+        <item>Rechtes Handgelenk</item>
+    </string-array>
+    <dimen name="activity_horizontal_margin">12dp</dimen>
+    <dimen name="activity_vertical_margin">12dp</dimen>
+    <dimen name="cardViewIndexMarginHorizontal">8dp</dimen>
+    <dimen name="cardViewIndexMarginVertical">5dp</dimen>
+    <dimen name="cardview_elevation_small">1dp</dimen>
+    <dimen name="cardview_margin">8dp</dimen>
+    <dimen name="cardview_margin_bottom">2dp</dimen>
+    <dimen name="cardview_margin_bottom_large">3dp</dimen>
+    <dimen name="icon_margin">10dp</dimen>
+    <dimen name="icon_size">80dp</dimen>
+    <dimen name="marginZero">0dp</dimen>
+    <dimen name="progress_circular">100dp</dimen>
+    <dimen name="progress_circular_container">110dp</dimen>
+    <dimen name="progress_circular_container_icon">80dp</dimen>
+    <dimen name="progress_circular_container_small">120dp</dimen>
+    <dimen name="progress_circular_icon">65dp</dimen>
+    <dimen name="progress_circular_small">110dp</dimen>
+    <item name="bound_observable" type="id"/>
+    <string name="age_range">Das Alter muss zwischen 0 und 200 liegen.</string>
+    <string name="app_name">movisenslibrary</string>
+    <string name="auto_start_new_measurement">Bei einem automatischen Neustart einer Messung werden alle auf dem Sensor gespeicherten Daten gelöscht. Sind Sie sicher, dass automatisch eine neue Messung gestartet und alle vorhandenen Daten gelöschen werden sollen?</string>
+    <string name="battery_level_desc">Sensor Battery Level: %1$s %%</string>
+    <string name="battery_notification">Akku schwach</string>
+    <string name="ble_not_supported">BLE is not supported</string>
+    <string name="connected">Connected</string>
+    <string name="desc_permission_movisensdata_READ">Permission to read Movisens from ContentProvider</string>
+    <string name="desc_permission_movisensdata_WRITE">Permission to write Movisens to ContentProvider</string>
+    <string name="disconnected">Disconnected</string>
+    <string name="enter_password">Bitte Passwort eingeben</string>
+    <string name="error_bluetooth_not_supported">Bluetooth not supported.</string>
+    <string name="firmware_version">1.11.58</string>
+    <string name="height_range">Die Größe in cm muss zwischen 0 und 300 liegen.</string>
+    <string name="hrv_is_valid_desc">Hrv Is Valid: %1$s</string>
+    <string name="label_data">Data:</string>
+    <string name="label_device_address">Device address:</string>
+    <string name="label_permission_READ">READ Permission</string>
+    <string name="label_permission_WRITE">WRITE Permission</string>
+    <string name="label_state">State:</string>
+    <string name="low_batterylevel">Der Akku des Sensors hat weniger als 10%</string>
+    <string name="measurement_already_running">Measurement can not be started, because there is already a measurement on the sensor</string>
+    <string name="metLevel_desc">MetLevel: (Sedentary: %1$ss, Light: %2$ss, Moderate: %3$ss, Vigorous: %4$ss)</string>
+    <string name="movement_acceleration_desc">Movement Acceleration: %1$,.3f g</string>
+    <string name="no">Nein</string>
+    <string name="no_data">No data</string>
+    <string name="no_running_messurment">Die Messung auf dem Sesnor wurde beendet. Bitte kontaktieren Sie die Studienleitung um eine neue Messung zu starten.</string>
+    <string name="notification_title">Sensor status</string>
+    <string name="ok">Ok</string>
+    <string name="preferences_activity_name">Preferences</string>
+    <string name="rmssd_desc">RMSSD: %1$,.0f ms</string>
+    <string name="rssi">RSSI: %1$s</string>
+    <string name="sampling_stoped">Sampling not running</string>
+    <string name="sampling_waiting">Waiting for data</string>
+    <string name="select_sensor">Klicken um Sensor auszuwählen</string>
+    <string name="selected_sensor">Selected Sensor:</string>
+    <string name="sensor">Sensor</string>
+    <string name="sensor_connected">Sensor connected</string>
+    <string name="sensor_connected_explain">Sensor is connected, everything is all right.</string>
+    <string name="sensor_disconnected">Sensor disconnected</string>
+    <string name="sensor_disconnected_explain">Sensor is disconnected, please attach it to your body.</string>
+    <string name="sensor_disconnected_gatt">Unable to initialize Bluetooth</string>
+    <string name="sensor_position_prompt">Wo tragen Sie den Sensor</string>
+    <string name="start_new_measurement">Bei einem Neustart einer Messung werden alle auf dem Sensor gespeicherten Daten gelöscht. Sind Sie sicher, dass eine neue Messung gestartet und alle vorhandenen Daten gelöschen werden sollen?</string>
+    <string name="start_sampling">Start Sampling</string>
+    <string name="stepCount_desc">StepCount: %1$s Steps</string>
+    <string name="stop_sampling">Stop Sampling</string>
+    <string name="title_devices">BLE Device Scan</string>
+    <string name="unknown_characteristic">Unknown characteristic</string>
+    <string name="unknown_device">Unknown device</string>
+    <string name="unknown_service">Unknown service</string>
+    <string name="waiting">Waiting for data…</string>
+    <string name="weight_range">Das Gewicht muss zwischen 0 und 300 liegen.</string>
+    <string name="wrong_password">Zugriff verweigert: Falsches Passwort</string>
+    <string name="yes">Ja</string>
+</resources>
