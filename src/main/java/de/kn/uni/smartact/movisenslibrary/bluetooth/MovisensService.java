@@ -188,20 +188,24 @@ public class MovisensService extends Service {
             updateNotification(R.string.notification_title, R.string.sensor_connected, R.drawable.ic_stat_connected);
             Log.d("S: CONNECTION_STATUS", "sensor_connected");
 
+            DateTime timestamp= new DateTime();
+
             HashMap<String, String> connectionStatus = new HashMap<>();
             connectionStatus.put(MOVISENS_CONNECTION_STATUS,"sensor_connected");
 
             //broadcastData(MOVISENS_CONNECTION_STATUS, "sensor_connected");
+
+            connectionStatus.put(MOVISENS_TIMESTAMP,TimeFormatUtil.getStringFromDate(timestamp));
             broadcastData(MOVISENS_CONNECTION_STATUS, connectionStatus.toString());
 
         } else {
             updateNotification(R.string.notification_title, R.string.sensor_disconnected, R.drawable.ic_stat_disconnected);
             Log.d("S: CONNECTION_STATUS", "sensor_disconnected");
-
+            DateTime timestamp= new DateTime();
 
             HashMap<String, String> connectionStatus = new HashMap<>();
             connectionStatus.put(MOVISENS_CONNECTION_STATUS,"sensor_disconnected");
-
+            connectionStatus.put(MOVISENS_TIMESTAMP,TimeFormatUtil.getStringFromDate(timestamp));
             //broadcastData(MOVISENS_CONNECTION_STATUS, "sensor_disconnected");
             broadcastData(MOVISENS_CONNECTION_STATUS, connectionStatus.toString());
         }
