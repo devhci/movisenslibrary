@@ -1,7 +1,9 @@
 package de.kn.uni.smartact.movisenslibrary.bluetooth;
 
+import android.annotation.TargetApi;
 import android.app.ActivityManager;
 import android.app.Notification;
+import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.Service;
 import android.bluetooth.BluetoothAdapter;
@@ -13,7 +15,9 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.graphics.Color;
 import android.os.Binder;
+import android.os.Build;
 import android.os.IBinder;
 import android.os.ParcelUuid;
 import android.preference.PreferenceManager;
@@ -155,10 +159,40 @@ public class MovisensService extends Service {
         super.onCreate();
         mScheduler = (ScheduledThreadPoolExecutor) Executors.newScheduledThreadPool(1);
 
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+            startMyOwnForeground();
+        else
+          //  startForeground(1, new Notification());
+
         startForeground(NOTIFICATION_ID, getNotification(R.string.notification_title, R.string.sensor_disconnected, R.drawable.ic_stat_disconnected));
 
         log(TAG, "Create Service");
     }
+
+
+
+      @TargetApi(Build.VERSION_CODES.O)
+     private void startMyOwnForeground(){
+        String NOTIFICATION_CHANNEL_ID = "com.example.simpleapp";
+        String channelName = "My Background Service";
+        NotificationChannel chan = new NotificationChannel(NOTIFICATION_CHANNEL_ID, channelName, NotificationManager.IMPORTANCE_NONE);
+        chan.setLightColor(Color.BLUE);
+        chan.setLockscreenVisibility(Notification.VISIBILITY_PRIVATE);
+        NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        assert manager != null;
+        manager.createNotificationChannel(chan);
+
+        NotificationCompat.Builder notificationBuilder = new NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID);
+        Notification notification = notificationBuilder.setOngoing(true)
+                .setSmallIcon(R.drawable.ic_stat_connected)
+                .setContentTitle("App is running in background")
+                .setPriority(NotificationManager.IMPORTANCE_MIN)
+                .setCategory(Notification.CATEGORY_SERVICE)
+                .build();
+        startForeground(2, notification);
+    }
+
 
     public Notification getNotification(int title, int text, int icon) {
         NotificationCompat.Builder foregroundNotification = new NotificationCompat.Builder(this);
