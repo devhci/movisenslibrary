@@ -108,21 +108,98 @@ public class MovisensService extends Service {
     private final static int IDLE_CHECK_INTERVAL = 30000;
     private final static int IDLE_RECONNECT_INTERVAL = 180000;
 
-
+    //private  static  int notificationFlag
+    private final IBinder mBinder = new MovisensService.LocalBinder();
+    String NOTIFICATION_CHANNEL_ID = "com.example.simpleapp";
+    String channelName = "My Background Service";
     private boolean allow_delete_data = false;
     private long timeLastReceived;
     private MeasurementStatus measurementStatus = new MeasurementStatus();
     private MovisensService.StateMachine dataReceiverSM;
     private BLEConnectionHandler connectionHandler;
-    private String deviceAdress;
-    private ScheduledThreadPoolExecutor mScheduler;
-    private UserData userData;
+    // Handles various events fired by the Service.
+    // ACTION_GATT_CONNECTED: connected to a GATT server.
+    // ACTION_GATT_DISCONNECTED: disconnected from a GATT server.
+    // ACTION_GATT_SERVICES_DISCOVERED: discovered GATT services.
+    // ACTION_DATA_AVAILABLE: received data from the device. This can be a
+    // result of read
+    // or notification operations.
+    private final BroadcastReceiver mGattUpdateReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            final String action = intent.getAction();
 
-    public void broadcastData(String key, String value) {
-        Intent dataIntent = new Intent(MOVISENS_INTENT_NAME);
-        dataIntent.putExtra(key,value);
-        sendBroadcast(dataIntent);
-    }
+            timeLastReceived = new Date().getTime();
+
+            if (BLEConnectionHandler.ACTION_GATT_CONNECTED.equals(action)) {
+                setConnectionState(true);
+
+                log(TAG, "BLE: GATT Connected");
+            } else if (BLEConnectionHandler.ACTION_GATT_DISCONNECTED.equals(action)) {
+                connectionHandler.close();
+                connectionHandler.reconnectDelayed();
+                setConnectionState(false);
+
+                log(TAG, "BLE: GATT Disconnected");
+            } else if (BLEConnectionHandler.ACTION_GATT_SERVICES_DISCOVERED.equals(action)) {
+                checkMeasurementStatus();
+
+                log(TAG, "BLE: Gatt services discovered");
+            } else if (BLEConnectionHandler.ACTION_DATA_AVAILABLE.equals(action)) {
+                final byte[] data = intent.getByteArrayExtra(BLEConnectionHandler.EXTRA_DATA);
+                ParcelUuid uuidExtra = intent.getParcelableExtra(BLEConnectionHandler.EXTRA_CHARACTERISTIC);
+                UUID uuid = uuidExtra.getUuid();
+
+                dataReceiverSM.state.receiveData(dataReceiverSM, data, uuid);
+
+            } else if (BLEConnectionHandler.ACTION_GATT_SERVICES_ERROR.equals(action)) {
+                connectionHandler.reconnectDelayed();
+                setConnectionState(false);
+
+                log(TAG, "BLE: Gatt services error");
+            } else if (BluetoothDevice.ACTION_BOND_STATE_CHANGED.equals(action)) {
+                log(TAG, "BLE: Bond state changed");
+            } else if (ACTION_LOG.equals(action)) {
+                String tag = intent.getStringExtra(EXTRA_TAG);
+                String message = intent.getStringExtra(EXTRA_MESSAGE);
+                log(tag, message);
+            }
+        }
+    };
+    private final BroadcastReceiver mBlueToothReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            final String action = intent.getAction();
+            if (action.equals(BluetoothAdapter.ACTION_STATE_CHANGED)) {
+                final int state = intent.getIntExtra(
+                        BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR);
+                switch (state) {
+                    case BluetoothAdapter.STATE_ON:
+                        setConnectionState(false);
+                        registerReceiver(mGattUpdateReceiver, makeGattUpdateIntentFilter());
+                        connectionHandler.reconnectDelayed();
+
+                        log(TAG, "BLE: Bluetooth turned on");
+                        break;
+                    case BluetoothAdapter.STATE_OFF:
+                        setConnectionState(false);
+
+                        try {
+                            unregisterReceiver(mGattUpdateReceiver);
+                        } catch (Exception exp) {
+                            exp.printStackTrace();
+                        }
+
+                        //reactivate bluetooth
+                        connectionHandler.setBluetooth(true);
+
+                        log(TAG, "BLE: Bluetooth turned off");
+                        break;
+                }
+            }
+        }
+    };
+    private String deviceAdress;
 
 
    /* public void broadcastData(String key, HashMap<String,String> value) {
@@ -130,6 +207,8 @@ public class MovisensService extends Service {
         dataIntent.putExtra(key,value);
         sendBroadcast(dataIntent);
     }*/
+    private ScheduledThreadPoolExecutor mScheduler;
+    private UserData userData;
 
     public static boolean isServiceRunning(Context context) {
         ActivityManager manager = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
@@ -141,12 +220,22 @@ public class MovisensService extends Service {
         return false;
     }
 
-    private final IBinder mBinder = new MovisensService.LocalBinder();
+    private static IntentFilter makeGattUpdateIntentFilter() {
+        final IntentFilter intentFilter = new IntentFilter();
+        intentFilter.addAction(BLEConnectionHandler.ACTION_GATT_CONNECTED);
+        intentFilter.addAction(BLEConnectionHandler.ACTION_GATT_DISCONNECTED);
+        intentFilter.addAction(BLEConnectionHandler.ACTION_GATT_SERVICES_DISCOVERED);
+        intentFilter.addAction(BLEConnectionHandler.ACTION_DATA_AVAILABLE);
+        intentFilter.addAction(BLEConnectionHandler.ACTION_GATT_SERVICES_ERROR);
+        intentFilter.addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED);
+        intentFilter.addAction(ACTION_LOG);
+        return intentFilter;
+    }
 
-    public class LocalBinder extends Binder {
-        public MovisensService getService() {
-            return MovisensService.this;
-        }
+    public void broadcastData(String key, String value) {
+        Intent dataIntent = new Intent(MOVISENS_INTENT_NAME);
+        dataIntent.putExtra(key,value);
+        sendBroadcast(dataIntent);
     }
 
     @Override
@@ -161,21 +250,20 @@ public class MovisensService extends Service {
 
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+
+
             startMyOwnForeground();
         else
-          //  startForeground(1, new Notification());
+            //startForeground(1, new Notification());
 
         startForeground(NOTIFICATION_ID, getNotification(R.string.notification_title, R.string.sensor_disconnected, R.drawable.ic_stat_disconnected));
 
         log(TAG, "Create Service");
     }
 
-
-
-      @TargetApi(Build.VERSION_CODES.O)
+     @TargetApi(Build.VERSION_CODES.O)
      private void startMyOwnForeground(){
-        String NOTIFICATION_CHANNEL_ID = "com.example.simpleapp";
-        String channelName = "My Background Service";
+
         NotificationChannel chan = new NotificationChannel(NOTIFICATION_CHANNEL_ID, channelName, NotificationManager.IMPORTANCE_NONE);
         chan.setLightColor(Color.BLUE);
         chan.setLockscreenVisibility(Notification.VISIBILITY_PRIVATE);
@@ -183,24 +271,34 @@ public class MovisensService extends Service {
         assert manager != null;
         manager.createNotificationChannel(chan);
 
-        NotificationCompat.Builder notificationBuilder = new NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID);
+      /*  NotificationCompat.Builder notificationBuilder = new NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID);
         Notification notification = notificationBuilder.setOngoing(true)
-                .setSmallIcon(R.drawable.ic_stat_connected)
-                .setContentTitle("App is running in background")
+                .setSmallIcon(icon)
+                .setContentTitle(getText(title))
+                .setContentText(getText(text))
                 .setPriority(NotificationManager.IMPORTANCE_MIN)
                 .setCategory(Notification.CATEGORY_SERVICE)
-                .build();
-        startForeground(2, notification);
+                .build();*/
+        startForeground(NOTIFICATION_ID, getNotification(R.string.notification_title, R.string.sensor_disconnected, R.drawable.ic_stat_disconnected));
     }
 
-
     public Notification getNotification(int title, int text, int icon) {
-        NotificationCompat.Builder foregroundNotification = new NotificationCompat.Builder(this);
+
+        NotificationCompat.Builder foregroundNotification;
+
+        if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.O){
+
+            foregroundNotification = new NotificationCompat.Builder(this,NOTIFICATION_CHANNEL_ID);
+        }else {
+
+            foregroundNotification = new NotificationCompat.Builder(this);
+        }
+
         foregroundNotification.setOngoing(true);
 
         foregroundNotification.setContentTitle(getText(title))
                 .setContentText(getText(text))
-                .setChannelId("My-Default-Channel-Id")
+
                 .setSmallIcon(icon);
 
         return foregroundNotification.build();
@@ -263,7 +361,6 @@ public class MovisensService extends Service {
         log(TAG, "Service stared");
         return Service.START_STICKY;
     }
-
 
     @Override
     public void onDestroy() {
@@ -347,102 +444,6 @@ public class MovisensService extends Service {
         final IntentFilter filter = new IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED);
         registerReceiver(mBlueToothReceiver, filter);
     }
-
-    private static IntentFilter makeGattUpdateIntentFilter() {
-        final IntentFilter intentFilter = new IntentFilter();
-        intentFilter.addAction(BLEConnectionHandler.ACTION_GATT_CONNECTED);
-        intentFilter.addAction(BLEConnectionHandler.ACTION_GATT_DISCONNECTED);
-        intentFilter.addAction(BLEConnectionHandler.ACTION_GATT_SERVICES_DISCOVERED);
-        intentFilter.addAction(BLEConnectionHandler.ACTION_DATA_AVAILABLE);
-        intentFilter.addAction(BLEConnectionHandler.ACTION_GATT_SERVICES_ERROR);
-        intentFilter.addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED);
-        intentFilter.addAction(ACTION_LOG);
-        return intentFilter;
-    }
-
-    // Handles various events fired by the Service.
-    // ACTION_GATT_CONNECTED: connected to a GATT server.
-    // ACTION_GATT_DISCONNECTED: disconnected from a GATT server.
-    // ACTION_GATT_SERVICES_DISCOVERED: discovered GATT services.
-    // ACTION_DATA_AVAILABLE: received data from the device. This can be a
-    // result of read
-    // or notification operations.
-    private final BroadcastReceiver mGattUpdateReceiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            final String action = intent.getAction();
-
-            timeLastReceived = new Date().getTime();
-
-            if (BLEConnectionHandler.ACTION_GATT_CONNECTED.equals(action)) {
-                setConnectionState(true);
-
-                log(TAG, "BLE: GATT Connected");
-            } else if (BLEConnectionHandler.ACTION_GATT_DISCONNECTED.equals(action)) {
-                connectionHandler.close();
-                connectionHandler.reconnectDelayed();
-                setConnectionState(false);
-
-                log(TAG, "BLE: GATT Disconnected");
-            } else if (BLEConnectionHandler.ACTION_GATT_SERVICES_DISCOVERED.equals(action)) {
-                checkMeasurementStatus();
-
-                log(TAG, "BLE: Gatt services discovered");
-            } else if (BLEConnectionHandler.ACTION_DATA_AVAILABLE.equals(action)) {
-                final byte[] data = intent.getByteArrayExtra(BLEConnectionHandler.EXTRA_DATA);
-                ParcelUuid uuidExtra = intent.getParcelableExtra(BLEConnectionHandler.EXTRA_CHARACTERISTIC);
-                UUID uuid = uuidExtra.getUuid();
-
-                dataReceiverSM.state.receiveData(dataReceiverSM, data, uuid);
-
-            } else if (BLEConnectionHandler.ACTION_GATT_SERVICES_ERROR.equals(action)) {
-                connectionHandler.reconnectDelayed();
-                setConnectionState(false);
-
-                log(TAG, "BLE: Gatt services error");
-            } else if (BluetoothDevice.ACTION_BOND_STATE_CHANGED.equals(action)) {
-                log(TAG, "BLE: Bond state changed");
-            } else if (ACTION_LOG.equals(action)) {
-                String tag = intent.getStringExtra(EXTRA_TAG);
-                String message = intent.getStringExtra(EXTRA_MESSAGE);
-                log(tag, message);
-            }
-        }
-    };
-
-    private final BroadcastReceiver mBlueToothReceiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            final String action = intent.getAction();
-            if (action.equals(BluetoothAdapter.ACTION_STATE_CHANGED)) {
-                final int state = intent.getIntExtra(
-                        BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR);
-                switch (state) {
-                    case BluetoothAdapter.STATE_ON:
-                        setConnectionState(false);
-                        registerReceiver(mGattUpdateReceiver, makeGattUpdateIntentFilter());
-                        connectionHandler.reconnectDelayed();
-
-                        log(TAG, "BLE: Bluetooth turned on");
-                        break;
-                    case BluetoothAdapter.STATE_OFF:
-                        setConnectionState(false);
-
-                        try {
-                            unregisterReceiver(mGattUpdateReceiver);
-                        } catch (Exception exp) {
-                            exp.printStackTrace();
-                        }
-
-                        //reactivate bluetooth
-                        connectionHandler.setBluetooth(true);
-
-                        log(TAG, "BLE: Bluetooth turned off");
-                        break;
-                }
-            }
-        }
-    };
 
     private void checkMeasurementStatus() {
         dataReceiverSM.reset();
@@ -626,6 +627,254 @@ public class MovisensService extends Service {
         return timeBB.putUint32(time / 1000).array();
     }
 
+    /**
+     * Function to separate Timestamp from the string and additionally gives the current
+     * sensor data for  MovementAcceleration
+     *
+     * @param movementAccelerationBuffered MovementAccelerationBuffered class from the sensor
+     */
+
+    private void splitAndSaveMovementAcceleration(MovementAccelerationBuffered movementAccelerationBuffered) {
+
+
+        String[] splits = movementAccelerationBuffered.toString().split("[\\r\\n]+");
+
+        for (int i = 0; i < splits.length; i++) {
+
+            DateTime timestamp = new DateTime((movementAccelerationBuffered.getTime().getTime() / 1000 + (long) (1 / movementAccelerationBuffered.getSamplerate() * i)) * 1000);
+           // Double bodyPosition[] = movementAccelerationBuffered.getMovementAcceleration();
+
+            HashMap<String, String> movementAcceleration = new HashMap<>();
+
+            movementAcceleration.put(MOVISENS_MOVEMENT_ACCELERATION,movementAccelerationBuffered.getMovementAcceleration()[i].toString() );
+            movementAcceleration.put(MOVISENS_TIMESTAMP,TimeFormatUtil.getStringFromDate(timestamp));
+
+            broadcastData(MOVISENS_MOVEMENT_ACCELERATION,movementAcceleration.toString() );
+
+            log("UpdateSensorData", "Time: " + TimeFormatUtil.getStringFromDate(timestamp) + " " + "MOVEMENT_ACCELERATION" + movementAccelerationBuffered.getMovementAcceleration()[i]);
+        }
+
+
+    }
+
+    /**
+     * Function to separate Timestamp from the string and additionally gives the current
+     * sensor data for Body Position
+     *
+     * @param bodyPositionBuffered BodyPositionBuffered class from the sensor
+     */
+    private void splitAndSaveBodyPosition(BodyPositionBuffered bodyPositionBuffered) {
+
+        String[] splits = bodyPositionBuffered.toString().split("[\\r\\n]+");
+
+        for (int i = 0; i < splits.length; i++) {
+
+            DateTime timestamp = new DateTime((bodyPositionBuffered.getTime().getTime() / 1000 + (long) (1 / bodyPositionBuffered.getSamplerate() * i)) * 1000);
+           // Enum bodyPosition[] = bodyPositionBuffered.getBodyPosition();
+
+            HashMap<String, String> bodyPosition = new HashMap<>();
+            bodyPosition.put(MOVISENS_TIMESTAMP,TimeFormatUtil.getStringFromDate(timestamp));
+            bodyPosition.put(MOVISENS_BODY_POSITION, bodyPositionBuffered.getBodyPosition()[i].toString());
+
+            broadcastData(MOVISENS_BODY_POSITION, bodyPosition.toString());
+
+            log("UpdateSensorData", "Time: " + TimeFormatUtil.getStringFromDate(timestamp) + " " + "BODY_POSITION: " + bodyPositionBuffered.getBodyPosition()[i]);
+        }
+    }
+
+    /**
+     * Function to separate Timestamp from the string and additionally gives the current
+     * sensor data for HRV
+     *
+     * @param rmssdBuffered RmssdBuffered class from the sensor
+     */
+
+  private void   splitAndSaveRMSSD(RmssdBuffered rmssdBuffered ){
+
+      String[] splits = rmssdBuffered.toString().split("[\\r\\n]+");
+
+      for (int i = 0; i < splits.length; i++) {
+
+          DateTime timestamp = new DateTime((rmssdBuffered.getTime().getTime() / 1000 + (long) (1 / rmssdBuffered.getSamplerate() * i)) * 1000);
+
+          HashMap<String, String> hrv = new HashMap<>();
+
+          hrv.put(MOVISENS_HRV,rmssdBuffered.getRmssd()[i].toString());
+          hrv.put(MOVISENS_TIMESTAMP,TimeFormatUtil.getStringFromDate(timestamp));
+
+          broadcastData(MOVISENS_HRV,hrv.toString());
+
+          log("UpdateSensorData", "Time: " + TimeFormatUtil.getStringFromDate(timestamp) + " " + "RMSSD: " + rmssdBuffered.getRmssd()[i]);
+      }
+
+
+
+  }
+
+    /**
+     * Function to separate Timestamp from the string and additionally gives  the current
+     * sensor data about whether ECG data is good enough for calculating HRV
+     *
+     * @param hrvIsValidBuffered HrvIsValidBuffered class from the sensor
+     */
+    private void splitAndSaveHRV(HrvIsValidBuffered hrvIsValidBuffered) {
+
+        String[] splits = hrvIsValidBuffered.toString().split("[\\r\\n]+");
+
+        for (int i = 0; i < splits.length; i++) {
+
+            DateTime timestamp = new DateTime((hrvIsValidBuffered.getTime().getTime() / 1000 + (long) (1 / hrvIsValidBuffered.getSamplerate() * i)) * 1000);
+
+
+            HashMap<String, String> isHrvValid = new HashMap<>();
+
+            isHrvValid.put(MOVISENS_IS_HRV_VALID,hrvIsValidBuffered.getHrvIsValid()[i].toString());
+            isHrvValid.put(MOVISENS_TIMESTAMP,TimeFormatUtil.getStringFromDate(timestamp));
+
+            broadcastData(MOVISENS_IS_HRV_VALID,isHrvValid.toString());
+
+            log("UpdateSensorData", "Time: " + TimeFormatUtil.getStringFromDate(timestamp) + " " + "HRV: " + hrvIsValidBuffered.getHrvIsValid()[i]);
+        }
+
+
+    }
+
+    /**
+     * Function to separate Timestamp from the string and additionally save it into the current
+     * sensor data
+     *
+     * @param hrMeanBuffered HrMeanBuffered class from the sensor
+     */
+
+
+    private  void splitAndSaveHR(HrMeanBuffered  hrMeanBuffered){
+
+        String[] splits = hrMeanBuffered.toString().split("[\\r\\n]+");
+
+        for (int i = 0; i < splits.length; i++) {
+
+            DateTime timestamp = new DateTime((hrMeanBuffered.getTime().getTime() / 1000 + (long) (1 / hrMeanBuffered.getSamplerate() * i)) * 1000);
+
+            HashMap<String, String> hr = new HashMap<>();
+            hr.put(MOVISENS_HR,hrMeanBuffered.getHrMean()[i].toString());
+            hr.put(MOVISENS_TIMESTAMP,TimeFormatUtil.getStringFromDate(timestamp));
+            broadcastData(MOVISENS_HR,hr.toString());
+
+            log("UpdateSensorData", "Time: " + TimeFormatUtil.getStringFromDate(timestamp) + " " + "HR: " + hrMeanBuffered.getHrMean()[i]);
+        }
+
+    }
+
+    /**
+     * Function to separate Timestamp from the string and additionally save it into the current
+     * sensor data
+     *
+     * @param stepsBuffered StepsBuffered class from the sensor
+     */
+    private void splitAndSaveSteps(StepsBuffered stepsBuffered) {
+        String[] splits = stepsBuffered.toString().split("[\\r\\n]+");
+
+        for (int i = 0; i < splits.length; i++) {
+            DateTime timestamp = new DateTime((stepsBuffered.getTime().getTime() / 1000 + (long) (1 / stepsBuffered.getSamplerate() * i)) * 1000);
+            int steps = stepsBuffered.getSteps()[i];
+
+            HashMap<String,String> stepCount= new HashMap<String,String>();
+
+            stepCount.put(MOVISENS_STEP_COUNT,stepsBuffered.getSteps()[i].toString());
+            stepCount.put(MOVISENS_TIMESTAMP,TimeFormatUtil.getStringFromDate(timestamp));
+
+            broadcastData(MOVISENS_STEP_COUNT,stepCount.toString());
+
+            log("UpdateSensorData", "Time: " + TimeFormatUtil.getStringFromDate(timestamp) + " " + "Steps: " + stepsBuffered.getSteps()[i]);
+        }
+    }
+
+    /**
+     * Function to separate Timestamp from the string and additionally save it into the current
+     * sensor data
+     *
+     * @param metLevelBuffered MetLevelBuffered class from sensor
+     */
+    private void splitAndSaveMetLevel(MetLevelBuffered metLevelBuffered) {
+        String[] splits = metLevelBuffered.toString().split("[\\r\\n]+");
+
+        for (int i = 0; i < splits.length; i++) {
+            DateTime timestamp = new DateTime((metLevelBuffered.getTime().getTime() / 1000 + (long) (1 / metLevelBuffered.getSamplerate() * i)) * 1000);
+            Short light = metLevelBuffered.getLight()[i];
+            Short vigorous = metLevelBuffered.getVigorous()[i];
+            Short moderate = metLevelBuffered.getModerate()[i];
+            Short sedentary=  metLevelBuffered.getSedentary()[i];
+            HashMap<String, String> metLevels = new HashMap<>();
+            metLevels.put("sedentary", sedentary.toString());
+            metLevels.put("light", light.toString());
+            metLevels.put("moderate", moderate.toString());
+            metLevels.put("vigorous", vigorous.toString());
+            metLevels.put(MOVISENS_TIMESTAMP,TimeFormatUtil.getStringFromDate(timestamp));
+            String metLevelJson = metLevels.toString();
+            broadcastData(MOVISENS_MET_LEVEL
+                    , metLevelJson);
+
+            log("UpdateSensorData", "Time: " + TimeFormatUtil.getStringFromDate(timestamp) + " Light: " + light + " Vigorous: " + vigorous + "Sedentary: " +sedentary +" Moderate: " + moderate);
+        }
+    }
+
+    /**
+     * Function to separate Timestamp from the string and additionally save it into the current
+     * sensor data
+     *
+     * @param metBuffered MetBuffered class from the sensor
+     */
+    private void splitAndSaveMet(MetBuffered metBuffered) {
+        Double[] metValues = metBuffered.getMet();
+
+        for (int i = 0; i < metValues.length; i++) {
+            DateTime timestamp = new DateTime((metBuffered.getTime().getTime() / 1000 + (long) (1 / metBuffered.getSamplerate() * i)) * 1000);
+
+            HashMap<String,String> met= new HashMap<String,String>();
+
+            met.put(MOVISENS_MET,metBuffered.getMet()[i].toString());
+            met.put(MOVISENS_TIMESTAMP,TimeFormatUtil.getStringFromDate(timestamp));
+
+
+            broadcastData(MOVISENS_MET, met.toString());
+            log("UpdateSensorData", "Time: " + TimeFormatUtil.getStringFromDate(timestamp) + " " + "Met: " + metBuffered.getMet()[i]);
+        }
+    }
+
+    /**
+     * Function to get last battery level and additionally save it into the current
+     * sensor data
+     *
+     * @param batteryBuffered BatteryLevelBuffered class from the sensor
+     */
+    private void splitAndSaveLastBatteryLevel(BatteryLevelBuffered batteryBuffered) {
+
+        String[] splits = batteryBuffered.toString().split("[\\r\\n]+");
+
+        for (int i = 0; i < splits.length; i++) {
+
+            DateTime timestamp = new DateTime((batteryBuffered.getTime().getTime() / 1000 + (long) (1 / batteryBuffered.getSamplerate() * i)) * 1000);
+
+            HashMap<String,String> battery= new HashMap<String,String>();
+
+            battery.put(MOVISENS_BATTERY_LEVEL,batteryBuffered.getLevel()[i].toString());
+            battery.put(MOVISENS_TIMESTAMP,TimeFormatUtil.getStringFromDate(timestamp));
+            broadcastData(MOVISENS_BATTERY_LEVEL, battery.toString());
+            log("UpdateSensorData", "Time: " + TimeFormatUtil.getStringFromDate(timestamp) + " " + "BATTERY: " + batteryBuffered.getLevel()[i]);
+        }
+    }
+
+    public void log(String tag, String message) {
+        if (SensorApplication.DEBUG) {
+            ContentValues values = new ContentValues();
+            values.put(MovisensData.LoggingData.COL_TIMESTAMP, TimeFormatUtil.getDateString());
+            values.put(COL_TAG, tag);
+            values.put(COL_MESSAGE, message);
+            getContentResolver().insert(MovisensData.LoggingData.LOGGINGDATA_URI, values);
+        }
+
+        Log.i(tag, message);
+    }
 
     // The StateMachine class
     public static class StateMachine {
@@ -635,10 +884,6 @@ public class MovisensService extends Service {
         StateMachine(MovisensService context) {
             this.context = context;
             reset();
-        }
-
-        interface State {
-            void receiveData(MovisensService.StateMachine sm, final byte[] data, UUID uuid);
         }
 
         public void reset() {
@@ -781,264 +1026,15 @@ public class MovisensService extends Service {
                 }
             }
         }
-    }
 
-
-    /**
-     * Function to separate Timestamp from the string and additionally gives the current
-     * sensor data for  MovementAcceleration
-     *
-     * @param movementAccelerationBuffered MovementAccelerationBuffered class from the sensor
-     */
-
-    private void splitAndSaveMovementAcceleration(MovementAccelerationBuffered movementAccelerationBuffered) {
-
-
-        String[] splits = movementAccelerationBuffered.toString().split("[\\r\\n]+");
-
-        for (int i = 0; i < splits.length; i++) {
-
-            DateTime timestamp = new DateTime((movementAccelerationBuffered.getTime().getTime() / 1000 + (long) (1 / movementAccelerationBuffered.getSamplerate() * i)) * 1000);
-           // Double bodyPosition[] = movementAccelerationBuffered.getMovementAcceleration();
-
-            HashMap<String, String> movementAcceleration = new HashMap<>();
-
-            movementAcceleration.put(MOVISENS_MOVEMENT_ACCELERATION,movementAccelerationBuffered.getMovementAcceleration()[i].toString() );
-            movementAcceleration.put(MOVISENS_TIMESTAMP,TimeFormatUtil.getStringFromDate(timestamp));
-
-            broadcastData(MOVISENS_MOVEMENT_ACCELERATION,movementAcceleration.toString() );
-
-            log("UpdateSensorData", "Time: " + TimeFormatUtil.getStringFromDate(timestamp) + " " + "MOVEMENT_ACCELERATION" + movementAccelerationBuffered.getMovementAcceleration()[i]);
-        }
-
-
-    }
-
-
-
-    /**
-     * Function to separate Timestamp from the string and additionally gives the current
-     * sensor data for Body Position
-     *
-     * @param bodyPositionBuffered BodyPositionBuffered class from the sensor
-     */
-    private void splitAndSaveBodyPosition(BodyPositionBuffered bodyPositionBuffered) {
-
-        String[] splits = bodyPositionBuffered.toString().split("[\\r\\n]+");
-
-        for (int i = 0; i < splits.length; i++) {
-
-            DateTime timestamp = new DateTime((bodyPositionBuffered.getTime().getTime() / 1000 + (long) (1 / bodyPositionBuffered.getSamplerate() * i)) * 1000);
-           // Enum bodyPosition[] = bodyPositionBuffered.getBodyPosition();
-
-            HashMap<String, String> bodyPosition = new HashMap<>();
-            bodyPosition.put(MOVISENS_TIMESTAMP,TimeFormatUtil.getStringFromDate(timestamp));
-            bodyPosition.put(MOVISENS_BODY_POSITION, bodyPositionBuffered.getBodyPosition()[i].toString());
-
-            broadcastData(MOVISENS_BODY_POSITION, bodyPosition.toString());
-
-            log("UpdateSensorData", "Time: " + TimeFormatUtil.getStringFromDate(timestamp) + " " + "BODY_POSITION: " + bodyPositionBuffered.getBodyPosition()[i]);
+        interface State {
+            void receiveData(MovisensService.StateMachine sm, final byte[] data, UUID uuid);
         }
     }
 
-
-    /**
-     * Function to separate Timestamp from the string and additionally gives the current
-     * sensor data for HRV
-     *
-     * @param rmssdBuffered RmssdBuffered class from the sensor
-     */
-
-  private void   splitAndSaveRMSSD(RmssdBuffered rmssdBuffered ){
-
-      String[] splits = rmssdBuffered.toString().split("[\\r\\n]+");
-
-      for (int i = 0; i < splits.length; i++) {
-
-          DateTime timestamp = new DateTime((rmssdBuffered.getTime().getTime() / 1000 + (long) (1 / rmssdBuffered.getSamplerate() * i)) * 1000);
-
-          HashMap<String, String> hrv = new HashMap<>();
-
-          hrv.put(MOVISENS_HRV,rmssdBuffered.getRmssd()[i].toString());
-          hrv.put(MOVISENS_TIMESTAMP,TimeFormatUtil.getStringFromDate(timestamp));
-
-          broadcastData(MOVISENS_HRV,hrv.toString());
-
-          log("UpdateSensorData", "Time: " + TimeFormatUtil.getStringFromDate(timestamp) + " " + "RMSSD: " + rmssdBuffered.getRmssd()[i]);
-      }
-
-
-
-  }
-
-
-    /**
-     * Function to separate Timestamp from the string and additionally gives  the current
-     * sensor data about whether ECG data is good enough for calculating HRV
-     *
-     * @param hrvIsValidBuffered HrvIsValidBuffered class from the sensor
-     */
-    private void splitAndSaveHRV(HrvIsValidBuffered hrvIsValidBuffered) {
-
-        String[] splits = hrvIsValidBuffered.toString().split("[\\r\\n]+");
-
-        for (int i = 0; i < splits.length; i++) {
-
-            DateTime timestamp = new DateTime((hrvIsValidBuffered.getTime().getTime() / 1000 + (long) (1 / hrvIsValidBuffered.getSamplerate() * i)) * 1000);
-
-
-            HashMap<String, String> isHrvValid = new HashMap<>();
-
-            isHrvValid.put(MOVISENS_IS_HRV_VALID,hrvIsValidBuffered.getHrvIsValid()[i].toString());
-            isHrvValid.put(MOVISENS_TIMESTAMP,TimeFormatUtil.getStringFromDate(timestamp));
-
-            broadcastData(MOVISENS_IS_HRV_VALID,isHrvValid.toString());
-
-            log("UpdateSensorData", "Time: " + TimeFormatUtil.getStringFromDate(timestamp) + " " + "HRV: " + hrvIsValidBuffered.getHrvIsValid()[i]);
+    public class LocalBinder extends Binder {
+        public MovisensService getService() {
+            return MovisensService.this;
         }
-
-
-    }
-
-
-    /**
-     * Function to separate Timestamp from the string and additionally save it into the current
-     * sensor data
-     *
-     * @param hrMeanBuffered HrMeanBuffered class from the sensor
-     */
-
-
-    private  void splitAndSaveHR(HrMeanBuffered  hrMeanBuffered){
-
-        String[] splits = hrMeanBuffered.toString().split("[\\r\\n]+");
-
-        for (int i = 0; i < splits.length; i++) {
-
-            DateTime timestamp = new DateTime((hrMeanBuffered.getTime().getTime() / 1000 + (long) (1 / hrMeanBuffered.getSamplerate() * i)) * 1000);
-
-            HashMap<String, String> hr = new HashMap<>();
-            hr.put(MOVISENS_HR,hrMeanBuffered.getHrMean()[i].toString());
-            hr.put(MOVISENS_TIMESTAMP,TimeFormatUtil.getStringFromDate(timestamp));
-            broadcastData(MOVISENS_HR,hr.toString());
-
-            log("UpdateSensorData", "Time: " + TimeFormatUtil.getStringFromDate(timestamp) + " " + "HR: " + hrMeanBuffered.getHrMean()[i]);
-        }
-
-    }
-
-
-
-    /**
-     * Function to separate Timestamp from the string and additionally save it into the current
-     * sensor data
-     *
-     * @param stepsBuffered StepsBuffered class from the sensor
-     */
-    private void splitAndSaveSteps(StepsBuffered stepsBuffered) {
-        String[] splits = stepsBuffered.toString().split("[\\r\\n]+");
-
-        for (int i = 0; i < splits.length; i++) {
-            DateTime timestamp = new DateTime((stepsBuffered.getTime().getTime() / 1000 + (long) (1 / stepsBuffered.getSamplerate() * i)) * 1000);
-            int steps = stepsBuffered.getSteps()[i];
-
-            HashMap<String,String> stepCount= new HashMap<String,String>();
-
-            stepCount.put(MOVISENS_STEP_COUNT,stepsBuffered.getSteps()[i].toString());
-            stepCount.put(MOVISENS_TIMESTAMP,TimeFormatUtil.getStringFromDate(timestamp));
-
-            broadcastData(MOVISENS_STEP_COUNT,stepCount.toString());
-
-            log("UpdateSensorData", "Time: " + TimeFormatUtil.getStringFromDate(timestamp) + " " + "Steps: " + stepsBuffered.getSteps()[i]);
-        }
-    }
-
-    /**
-     * Function to separate Timestamp from the string and additionally save it into the current
-     * sensor data
-     *
-     * @param metLevelBuffered MetLevelBuffered class from sensor
-     */
-    private void splitAndSaveMetLevel(MetLevelBuffered metLevelBuffered) {
-        String[] splits = metLevelBuffered.toString().split("[\\r\\n]+");
-
-        for (int i = 0; i < splits.length; i++) {
-            DateTime timestamp = new DateTime((metLevelBuffered.getTime().getTime() / 1000 + (long) (1 / metLevelBuffered.getSamplerate() * i)) * 1000);
-            Short light = metLevelBuffered.getLight()[i];
-            Short vigorous = metLevelBuffered.getVigorous()[i];
-            Short moderate = metLevelBuffered.getModerate()[i];
-            Short sedentary=  metLevelBuffered.getSedentary()[i];
-            HashMap<String, String> metLevels = new HashMap<>();
-            metLevels.put("sedentary", sedentary.toString());
-            metLevels.put("light", light.toString());
-            metLevels.put("moderate", moderate.toString());
-            metLevels.put("vigorous", vigorous.toString());
-            metLevels.put(MOVISENS_TIMESTAMP,TimeFormatUtil.getStringFromDate(timestamp));
-            String metLevelJson = metLevels.toString();
-            broadcastData(MOVISENS_MET_LEVEL
-                    , metLevelJson);
-
-            log("UpdateSensorData", "Time: " + TimeFormatUtil.getStringFromDate(timestamp) + " Light: " + light + " Vigorous: " + vigorous + "Sedentary: " +sedentary +" Moderate: " + moderate);
-        }
-    }
-
-    /**
-     * Function to separate Timestamp from the string and additionally save it into the current
-     * sensor data
-     *
-     * @param metBuffered MetBuffered class from the sensor
-     */
-    private void splitAndSaveMet(MetBuffered metBuffered) {
-        Double[] metValues = metBuffered.getMet();
-
-        for (int i = 0; i < metValues.length; i++) {
-            DateTime timestamp = new DateTime((metBuffered.getTime().getTime() / 1000 + (long) (1 / metBuffered.getSamplerate() * i)) * 1000);
-
-            HashMap<String,String> met= new HashMap<String,String>();
-
-            met.put(MOVISENS_MET,metBuffered.getMet()[i].toString());
-            met.put(MOVISENS_TIMESTAMP,TimeFormatUtil.getStringFromDate(timestamp));
-
-
-            broadcastData(MOVISENS_MET, met.toString());
-            log("UpdateSensorData", "Time: " + TimeFormatUtil.getStringFromDate(timestamp) + " " + "Met: " + metBuffered.getMet()[i]);
-        }
-    }
-
-
-    /**
-     * Function to get last battery level and additionally save it into the current
-     * sensor data
-     *
-     * @param batteryBuffered BatteryLevelBuffered class from the sensor
-     */
-    private void splitAndSaveLastBatteryLevel(BatteryLevelBuffered batteryBuffered) {
-
-        String[] splits = batteryBuffered.toString().split("[\\r\\n]+");
-
-        for (int i = 0; i < splits.length; i++) {
-
-            DateTime timestamp = new DateTime((batteryBuffered.getTime().getTime() / 1000 + (long) (1 / batteryBuffered.getSamplerate() * i)) * 1000);
-
-            HashMap<String,String> battery= new HashMap<String,String>();
-
-            battery.put(MOVISENS_BATTERY_LEVEL,batteryBuffered.getLevel()[i].toString());
-            battery.put(MOVISENS_TIMESTAMP,TimeFormatUtil.getStringFromDate(timestamp));
-            broadcastData(MOVISENS_BATTERY_LEVEL, battery.toString());
-            log("UpdateSensorData", "Time: " + TimeFormatUtil.getStringFromDate(timestamp) + " " + "BATTERY: " + batteryBuffered.getLevel()[i]);
-        }
-    }
-
-
-    public void log(String tag, String message) {
-        if (SensorApplication.DEBUG) {
-            ContentValues values = new ContentValues();
-            values.put(MovisensData.LoggingData.COL_TIMESTAMP, TimeFormatUtil.getDateString());
-            values.put(COL_TAG, tag);
-            values.put(COL_MESSAGE, message);
-            getContentResolver().insert(MovisensData.LoggingData.LOGGINGDATA_URI, values);
-        }
-
-        Log.i(tag, message);
     }
 }
