@@ -166,6 +166,7 @@ public class MovisensService extends Service {
 
         foregroundNotification.setContentTitle(getText(title))
                 .setContentText(getText(text))
+                .setChannelId("My-Default-Channel-Id")
                 .setSmallIcon(icon);
 
         return foregroundNotification.build();
